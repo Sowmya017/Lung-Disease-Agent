@@ -1,0 +1,4 @@
+venv/
+__pycache__/
+best_covid_efficientnet.pth
+best_lung_model.pth
