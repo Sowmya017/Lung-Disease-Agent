@@ -1,57 +1,91 @@
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "mistral"
+OLLAMA_URL = "http://localhost:11434/api/generate"
+MODEL_NAME = "mistral"  # Use phi for faster response
+
 
 class ChatAgent:
+
     def __init__(self):
-        self.conversation_history = []
-        self.current_context = None
+        pass
 
-    def ask(self, question, context):
-        # Update context if new result comes in
-        if context != self.current_context:
-            self.current_context = context
-            self.conversation_history = []  # reset history for new scan
+    def build_prompt(self, user_question, result, chat_history):
+        condition = result["predicted_condition"]
+        confidence = result["confidence_percentage"]
 
-        system_message = {
-            "role": "system",
-            "content": (
-                f"You are a helpful medical assistant. "
-                f"A lung X-ray was analyzed with the following result:\n"
-                f"Detected Condition: {context['predicted_condition']}\n"
-                f"Model Confidence: {context['confidence_percentage']}%\n\n"
-                f"Answer the user's questions clearly and helpfully. "
-                f"Always remind users to consult a licensed doctor for medical decisions."
-            )
+        # Format previous conversation
+        history_text = ""
+        for item in chat_history:
+            history_text += f"User: {item['question']}\n"
+            history_text += f"Assistant: {item['answer']}\n"
+
+        prompt = f"""
+You are a professional AI medical assistant supporting hospital staff.
+
+A lung X-ray was analyzed using a deep learning model.
+
+===============================
+PATIENT DIAGNOSIS CONTEXT
+===============================
+Detected Condition: {condition}
+Model Confidence: {confidence}%
+
+===============================
+PREVIOUS CONVERSATION
+===============================
+{history_text}
+
+===============================
+NEW USER QUESTION
+===============================
+{user_question}
+
+===============================
+INSTRUCTIONS
+===============================
+- Answer clearly and professionally.
+- Use medical reasoning based on the detected condition.
+- Refer to previous conversation if relevant.
+- Do NOT hallucinate unknown clinical facts.
+- If uncertainty exists, state it clearly.
+- Provide helpful guidance but avoid making definitive medical decisions.
+- Always remind that final decisions must be made by a licensed physician.
+
+End your response with:
+"This analysis is AI-assisted and must be verified by a licensed medical professional."
+"""
+
+        return prompt
+
+    def call_ollama(self, prompt):
+
+        payload = {
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "temperature": 0.3
+            }
         }
-
-        self.conversation_history.append({
-            "role": "user",
-            "content": question
-        })
 
         try:
             response = requests.post(
                 OLLAMA_URL,
-                json={
-                    "model": MODEL_NAME,
-                    "messages": [system_message] + self.conversation_history,
-                    "stream": False
-                },
-                timeout=60
+                json=payload,
+                timeout=120
             )
-            response.raise_for_status()
-            answer = response.json()["message"]["content"]
 
-        except requests.exceptions.ConnectionError:
-            answer = "❌ Ollama is not running. Please start it with: ollama serve"
+            if response.status_code == 200:
+                return response.json()["response"]
+            else:
+                return f"LLM Error: {response.status_code} | {response.text}"
+
         except Exception as e:
-            answer = f"❌ Error: {str(e)}"
+            return f"Connection Error: {str(e)}"
 
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": answer
-        })
+    def ask(self, user_question, result, chat_history):
+
+        prompt = self.build_prompt(user_question, result, chat_history)
+        answer = self.call_ollama(prompt)
 
         return answer

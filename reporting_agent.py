@@ -1,5 +1,3 @@
-# reporting_agent.py
-
 import requests
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
@@ -12,6 +10,9 @@ ICD10_CODES = {
     "Viral Pneumonia": "J12.9"
 }
 
+# ==========================
+# Severity Estimation
+# ==========================
 def estimate_severity(confidence):
     if confidence >= 0.85:
         return "Severe"
@@ -19,11 +20,12 @@ def estimate_severity(confidence):
         return "Moderate"
     else:
         return "Mild"
+
+
 # ==========================
 # Confidence Calibration
 # ==========================
 def calibrate_confidence(confidence):
-
     if confidence >= 0.85:
         return "Highly Suggestive", "Low"
     elif confidence >= 0.60:
@@ -33,26 +35,57 @@ def calibrate_confidence(confidence):
 
 
 # ==========================
+# Call Ollama API
+# ==========================
+def call_ollama(prompt):
+
+    payload = {
+        "model": MODEL_NAME,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.2,
+            "top_p": 0.9
+        }
+    }
+
+    try:
+        response = requests.post(OLLAMA_URL, json=payload)
+
+        if response.status_code == 200:
+            return response.json()["response"]
+        else:
+            return f"Error: Ollama returned status {response.status_code}"
+
+    except Exception as e:
+        return f"Connection Error: {str(e)}"
+
+
+# ==========================
 # Build Structured Prompt
 # ==========================
-def build_prompt(result):
-    
+def build_prompt(result, patient_info):
+
     condition = result["predicted_condition"]
     confidence_prob = result["confidence_score"]
     confidence_percent = result["confidence_percentage"]
 
     icd_code = ICD10_CODES.get(condition, "Not Assigned")
     severity = estimate_severity(confidence_prob)
-
     likelihood, uncertainty = calibrate_confidence(confidence_prob)
 
     prompt = f"""
 You are a clinical radiology reporting assistant.
 
-Generate a STRICTLY structured chest X-ray report using the format below.
-Do NOT add extra sections.
+Generate a STRICTLY structured chest X-ray report.
 
 ----------------------------------------
+PATIENT INFORMATION:
+Name: {patient_info['name']}
+Age: {patient_info['age']}
+Gender: {patient_info['gender']}
+Patient ID: {patient_info['patient_id']}
+
 EXAMINATION:
 Chest X-ray (AI-assisted analysis)
 
@@ -90,34 +123,11 @@ Keep report concise.
 
 
 # ==========================
-# Call Ollama API
-# ==========================
-def call_ollama(prompt):
-
-    payload = {
-        "model": MODEL_NAME,
-        "prompt": prompt,
-        "stream": False,
-        "options": {
-            "temperature": 0.2,   # Low temperature for stability
-            "top_p": 0.9
-        }
-    }
-
-    response = requests.post(OLLAMA_URL, json=payload)
-
-    if response.status_code == 200:
-        return response.json()["response"]
-    else:
-        return "Error generating report from Ollama."
-
-
-# ==========================
 # Main Function
 # ==========================
-def generate_medical_report(result):
+def generate_medical_report(result, patient_info):
 
-    prompt = build_prompt(result)
+    prompt = build_prompt(result, patient_info)
     report = call_ollama(prompt)
 
     return report
